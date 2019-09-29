@@ -1,96 +1,76 @@
-#include <ESP8266WiFi.h>
-#include <WiFiClient.h>
-#include <ESP8266WebServer.h>
-#include <ESP8266mDNS.h>
+#include "IPAddress.h"
+#include "painlessMesh.h"
+#include "Hash.h"
+#include <ESPAsyncTCP.h>
+#include <ESPAsyncWebServer.h>
 
-#ifndef STASSID
-#define STASSID "Ap 201"
-#define STAPSK "oreiaseca"
-#endif
+#define   MESH_PREFIX     "whateverYouLike"
+#define   MESH_PASSWORD   "somethingSneaky"
+#define   MESH_PORT       5555
 
-const char *ssid = STASSID;
-const char *password = STAPSK;
+#define   STATION_SSID     "Ap 201"
+#define   STATION_PASSWORD "oreiaseca"
 
-ESP8266WebServer server(80);
+#define HOSTNAME "HTTP_BRIDGE"
 
-void handleRoot()
-{
-  digitalWrite(LED_BUILTIN, LOW);
-	server.send(200, "text/plain", "hello from esp8266!");
-  digitalWrite(LED_BUILTIN, HIGH);
+// Prototype
+void receivedCallback( const uint32_t &from, const String &msg );
+IPAddress getlocalIP();
+
+painlessMesh  mesh;
+AsyncWebServer server(80);
+IPAddress myIP(0,0,0,0);
+IPAddress myAPIP(0,0,0,0);
+
+const int ledPin = 1;
+
+void setup() {
+  Serial.begin(115200);
+  pinMode(ledPin, OUTPUT);
+  digitalWrite(ledPin, HIGH);
+  mesh.setDebugMsgTypes( ERROR | STARTUP | CONNECTION );  // set before init() so that you can see startup messages
+
+  // Channel set to 6. Make sure to use the same channel for your mesh and for you other
+  // network (STATION_SSID)
+  mesh.init( MESH_PREFIX, MESH_PASSWORD, MESH_PORT, WIFI_AP_STA, 6 );
+  mesh.onReceive(&receivedCallback);
+
+  mesh.stationManual(STATION_SSID, STATION_PASSWORD);
+  mesh.setHostname(HOSTNAME);
+
+//   Bridge node, should (in most cases) be a root node. See [the wiki](https://gitlab.com/painlessMesh/painlessMesh/wikis/Possible-challenges-in-mesh-formation) for some background
+  mesh.setRoot(true);
+//   This node and all other nodes should ideally know the mesh contains a root, so call this on all nodes
+  mesh.setContainsRoot(true);
+
+  myAPIP = IPAddress(mesh.getAPIP());
+  Serial.println("My AP IP is " + myAPIP.toString());
+
+  //Async webserver
+  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+    request->send(200, "text/html", "<form>Text to Broadcast<br><input type='text' name='BROADCAST'><br><br><input type='submit' value='Submit'></form>");
+    if (request->hasArg("BROADCAST")){
+      String msg = request->arg("BROADCAST");
+      mesh.sendBroadcast(msg);
+    }
+  });
+  server.begin();
+
 }
 
-void handleNotFound()
-{
-  digitalWrite(LED_BUILTIN, LOW);
-	String message = "File Not Found\n\n";
-	message += "URI: ";
-	message += server.uri();
-	message += "\nMethod: ";
-	message += (server.method() == HTTP_GET) ? "GET" : "POST";
-	message += "\nArguments: ";
-	message += server.args();
-	message += "\n";
-	for (uint8_t i = 0; i < server.args(); i++)
-	{
-		message += " " + server.argName(i) + ": " + server.arg(i) + "\n";
-	}
-	server.send(404, "text/plain", message);
-  digitalWrite(LED_BUILTIN, HIGH);
+void loop() {
+  mesh.update();
+  if(myIP != getlocalIP()){
+    myIP = getlocalIP();
+    Serial.println("My IP is " + myIP.toString());
+  }
 }
 
-void handleData()
-{
-	if (server.hasArg("data")){
-    digitalWrite(LED_BUILTIN, LOW);
-		String data = server.arg("data");
-		server.send(200, "text/plain", data);
-	} else {
-		server.send(400, "text/plain", "dado incorreto");
-	}
+void receivedCallback( const uint32_t &from, const String &msg ) {
+  digitalWrite(ledPin, LOW);
+  Serial.printf("bridge: Received from %u msg=%s\n", from, msg.c_str());
 }
 
-void setup()
-{
-  pinMode(LED_BUILTIN, OUTPUT);
-	Serial.begin(115200);
-	WiFi.mode(WIFI_STA);
-	WiFi.begin(ssid, password);
-	Serial.println("");
-
-	// Wait for connection
-	while (WiFi.status() != WL_CONNECTED)
-	{
-		delay(500);
-		Serial.print(".");
-	}
-	Serial.println("");
-	Serial.print("Connected to ");
-	Serial.println(ssid);
-	Serial.print("IP address: ");
-	Serial.println(WiFi.localIP());
-
-	if (MDNS.begin("esp8266"))
-	{
-		Serial.println("MDNS responder started");
-	}
-
-	server.on("/", handleRoot);
-
-	server.on("/inline", []() {
-		server.send(200, "text/plain", "this works as well");
-	});
-
-	server.on("/sendData", handleData);
-
-	server.onNotFound(handleNotFound);
-
-	server.begin();
-	Serial.println("HTTP server started");
-}
-
-void loop()
-{
-	server.handleClient();
-	MDNS.update();
+IPAddress getlocalIP() {
+ return IPAddress(mesh.getStationIP());
 }
