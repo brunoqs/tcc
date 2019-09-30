@@ -13,6 +13,8 @@
 
 #define HOSTNAME "HTTP_BRIDGE"
 
+SimpleList<uint32_t> nodes;
+
 // Prototype
 void receivedCallback( const uint32_t &from, const String &msg );
 IPAddress getlocalIP();
@@ -23,11 +25,13 @@ IPAddress myIP(0,0,0,0);
 IPAddress myAPIP(0,0,0,0);
 
 const int ledPin = 1;
+int pinState;
 
 void setup() {
   Serial.begin(115200);
   pinMode(ledPin, OUTPUT);
-  digitalWrite(ledPin, HIGH);
+  pinState = HIGH;
+  digitalWrite(ledPin, pinState);
   mesh.setDebugMsgTypes( ERROR | STARTUP | CONNECTION );  // set before init() so that you can see startup messages
 
   // Channel set to 6. Make sure to use the same channel for your mesh and for you other
@@ -48,11 +52,31 @@ void setup() {
 
   //Async webserver
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
-    request->send(200, "text/html", "<form>Text to Broadcast<br><input type='text' name='BROADCAST'><br><br><input type='submit' value='Submit'></form>");
-    if (request->hasArg("BROADCAST")){
+    bool success = true;
+    if (request->hasArg("BROADCAST") && request->hasArg("UUID")) {
       String msg = request->arg("BROADCAST");
-      mesh.sendBroadcast(msg);
+      uint32_t uuid = request->arg("UUID").toInt();
+      success = mesh.sendSingle(uuid, msg);
     }
+    if (success)
+      request->send(200, "text/html", "<form>Text to Broadcast<br><input type='text' name='BROADCAST'><br>UUID ESP<br><input type='text' name='UUID'><br><br><input type='submit' value='Submit'></form>");
+    request->send(400, "text/plain", "Error");
+  });
+
+  server.on("/nodes", HTTP_GET, [](AsyncWebServerRequest *request){
+//      String jsonNodes = "{'nodes': [";
+//      nodes = mesh.getNodeList();
+//      SimpleList<uint32_t>::iterator node = nodes.begin();
+//      while (node != nodes.end()) {
+//        jsonNodes += "'" + String(*node) + "',";
+//        node++;
+//      }
+//      jsonNodes.remove(jsonNodes.length()-1);
+//      jsonNodes += "], 'rootUUID': ";
+//      jsonNodes += String(mesh.getNodeId()) + ',';
+//      jsonNodes += "'subConnection': " + mesh.subConnectionJson() + '}';
+
+    request->send(200, "application/json", mesh.subConnectionJson());
   });
   server.begin();
 
@@ -67,7 +91,13 @@ void loop() {
 }
 
 void receivedCallback( const uint32_t &from, const String &msg ) {
-  digitalWrite(ledPin, LOW);
+  if (pinState == HIGH) {
+    digitalWrite(ledPin, LOW);
+    pinState = LOW;
+  } else {
+    digitalWrite(ledPin, HIGH);
+    pinState = HIGH;
+  }
   Serial.printf("bridge: Received from %u msg=%s\n", from, msg.c_str());
 }
 
