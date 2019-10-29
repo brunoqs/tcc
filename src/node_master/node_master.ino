@@ -32,25 +32,26 @@ int pinState;
 
 void setup() {
   Serial.begin(115200);
+  
   pinMode(ledPin, OUTPUT);
   pinState = HIGH;
   digitalWrite(ledPin, pinState);
-  system_phy_set_max_tpw(1);
+  
+  system_phy_set_max_tpw(1); // altera o potencia do wifi
+  
   mesh.setDebugMsgTypes( ERROR | DEBUG | STARTUP | CONNECTION );  // set before init() so that you can see startup messages
 
   // Channel set to 6. Make sure to use the same channel for your mesh and for you other
   // network (STATION_SSID)
-  // void init(String ssid, String password, uint16_t port = 5555, enum nodeMode connectMode = STA_AP, _auth_mode authmode = AUTH_WPA2_PSK, uint8_t channel = 1, phy_mode_t phymode = PHY_MODE_11G, uint8_t maxtpw = 82, uint8_t hidden = 0, uint8_t maxconn = 4);
-  // uint8_t maxtpw = 82 determina altera o dBm
   mesh.init( MESH_PREFIX, MESH_PASSWORD, MESH_PORT, WIFI_AP_STA, 6);
   mesh.onReceive(&receivedCallback);
 
   mesh.stationManual(STATION_SSID, STATION_PASSWORD);
   mesh.setHostname(HOSTNAME);
 
-//   Bridge node, should (in most cases) be a root node. See [the wiki](https://gitlab.com/painlessMesh/painlessMesh/wikis/Possible-challenges-in-mesh-formation) for some background
+  // Bridge node, should (in most cases) be a root node. See [the wiki](https://gitlab.com/painlessMesh/painlessMesh/wikis/Possible-challenges-in-mesh-formation) for some background
   mesh.setRoot(true);
-//   This node and all other nodes should ideally know the mesh contains a root, so call this on all nodes
+  // This node and all other nodes should ideally know the mesh contains a root, so call this on all nodes
   mesh.setContainsRoot(true);
 
   myAPIP = IPAddress(mesh.getAPIP());
@@ -59,13 +60,13 @@ void setup() {
   //Async webserver
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     bool success = true;
-    if (request->hasArg("BROADCAST") && request->hasArg("UUID")) {
-      String msg = request->arg("BROADCAST");
-      uint32_t uuid = request->arg("UUID").toInt();
+    if (request->hasArg("text") && request->hasArg("uuid")) {
+      String msg = request->arg("text");
+      uint32_t uuid = request->arg("uuid").toInt();
       success = mesh.sendSingle(uuid, msg);
     }
     if (success)
-      request->send(200, "text/html", "<form>Text to Broadcast<br><input type='text' name='BROADCAST'><br>UUID ESP<br><input type='text' name='UUID'><br><br><input type='submit' value='Submit'></form>");
+      request->send(200, "text/html", "<form>Text to Send<br><input type='text' name='text'><br>UUID ESP<br><input type='text' name='uuid'><br><br><input type='submit' value='Submit'></form>");
     request->send(400, "text/plain", "Error");
   });
 
@@ -77,12 +78,17 @@ void setup() {
     String jsonNodes = "{'nodes': [";
     nodes = mesh.getNodeList();
     SimpleList<uint32_t>::iterator node = nodes.begin();
-    while (node != nodes.end()) {
-      jsonNodes += "'" + String(*node) + "',";
-      node++;
+    if (node == nodes.end()) {
+      jsonNodes += "], 'rootUUID': ";
+    } else {
+      while (node != nodes.end()) {
+        jsonNodes += "'" + String(*node) + "',";
+        node++;
+      }
+      jsonNodes.remove(jsonNodes.length()-1);
+      jsonNodes += "], 'rootUUID': ";
     }
-    jsonNodes.remove(jsonNodes.length()-1);
-    jsonNodes += "], 'rootUUID': ";
+    
     jsonNodes += String(mesh.getNodeId()) + "}";
 
     request->send(200, "application/json", jsonNodes);
